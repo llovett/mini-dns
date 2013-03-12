@@ -160,6 +160,11 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 		   string_name,
 		   inet_ntoa(*((struct in_addr *)answer_ptr)));
 	    got_answer=1;
+
+	    // Are we done?
+	    if ( !strcasecmp(string_name, hostname) ) {
+		return inet_ntoa(*((struct in_addr *)answer_ptr));
+	    }
 	}
 	// NS record
 	else if(htons(rr->type)==RECTYPE_NS) {
@@ -209,7 +214,6 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 
     shutdown(sock,SHUT_RDWR);
     close(sock);
-
 }
 
 int main(int argc, char** argv)
