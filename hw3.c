@@ -83,7 +83,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
     // Loop to contact a nameserver
     while (!could_contact_ns) {
 	// Try a nameserver
-	in_addr_t nameserver_addr=inet_addr(nameservers->server);
+	in_addr_t nameserver_addr=inet_addr(nameservers->server_addr);
 
 	// construct the query message
 	uint8_t query[1500];
@@ -96,7 +96,10 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 
 	int send_count = sendto(sock, query, query_len, 0,
 				(struct sockaddr*)&addr,sizeof(addr));
-	if(send_count<0) { perror("Send failed");	exit(1); }
+	if(send_count<0) {
+	    perror("Send failed");
+	    exit(1);
+	}
 
 	// Await the response
 	int rec_count = recv(sock,answerbuf,1500,0);
@@ -138,6 +141,8 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 
     // now answer_ptr points at the first answer. loop through
     // all answers in all sections
+    linkedlist *new_nameservers = NULL;
+    linkedlist *nn_head = NULL;
     for(a=0;a<answer_count+auth_count+other_count;a++) {
 	// first the name this answer is referring to
 	char string_name[255];
@@ -156,14 +161,26 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	const uint8_t RECTYPE_AAAA=28;
 
 	if(htons(rr->type)==RECTYPE_A) {
+	    char *ip_addr = inet_ntoa(*((struct in_addr *)answer_ptr));
+
 	    printf("The name %s resolves to IP addr: %s\n",
 		   string_name,
-		   inet_ntoa(*((struct in_addr *)answer_ptr)));
+		   ip_addr);
 	    got_answer=1;
 
 	    // Are we done?
 	    if ( !strcasecmp(string_name, hostname) ) {
-		return inet_ntoa(*((struct in_addr *)answer_ptr));
+		return ip_addr;
+	    }
+
+	    // Try to match some IPs up with symbolic hostnames for nameservers
+	    linkedlist *node = nn_head;
+	    while ( node ) {
+		if ( !strcasecmp(string_name,node->server) ) {
+		    node->server_addr = strdup(ip_addr);
+		    break;
+		}
+		node = node->next;
 	    }
 	}
 	// NS record
@@ -174,6 +191,13 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 		printf("The name %s can be resolved by NS: %s\n",
 		       string_name, ns_string);
 	    got_answer=1;
+	    if ( NULL == new_nameservers ) {
+		new_nameservers = list_new(ns_string);
+		nn_head = new_nameservers;
+	    } else {
+		new_nameservers->next = list_new(ns_string);
+		new_nameservers = new_nameservers->next;
+	    }
 	}
 	// CNAME record
 	else if(htons(rr->type)==RECTYPE_CNAME) {
@@ -210,10 +234,22 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	answer_ptr+=htons(rr->datalen);
     }
 
-    return NULL;
-
     shutdown(sock,SHUT_RDWR);
     close(sock);
+
+    new_nameservers = nn_head;
+    if ( NULL != new_nameservers ) {
+	linkedlist *node = nn_head;
+	while ( node ) {
+	    printf("nameserver: %s (ip: %s)\n", node->server, node->server_addr);
+	    node = node->next;
+	}
+
+	return resolve_address(hostname, new_nameservers);
+    }
+    // TODO:Free the nameservers linkedlist
+
+    return NULL;
 }
 
 int main(int argc, char** argv)
@@ -258,7 +294,7 @@ int main(int argc, char** argv)
 
     	char root_addr[256];
     	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
-    	    ns->server = strdup(&root_addr[0]);
+    	    ns->server_addr = strdup(&root_addr[0]);
     	}
 
     	fclose(servers_in);
