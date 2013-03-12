@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include "dns.h"
 #include "linkedlist.h"
 
@@ -24,7 +25,7 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
 
     in_addr_t rev_addr=inet_addr(hostname);
     if(rev_addr!=INADDR_NONE) {
-	static char reverse_name[255];		
+	static char reverse_name[255];
 	sprintf(reverse_name,"%d.%d.%d.%d.in-addr.arpa",
 		(rev_addr&0xff000000)>>24,
 		(rev_addr&0xff0000)>>16,
@@ -40,16 +41,16 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
     uint16_t query_id = (uint16_t) (random() & 0xffff);
     hdr->id = htons(query_id);
     // set header flags to request recursive query
-    hdr->flags = htons(0x0000);	
+    hdr->flags = htons(0x0000);
     // 1 question, no answers or other records
     hdr->q_count=htons(1);
 
     // add the name
-    int query_len = sizeof(struct dns_hdr); 
+    int query_len = sizeof(struct dns_hdr);
     int name_len=to_dns_style(hostname,query+query_len);
-    query_len += name_len; 
-	
-    // now the query type: A or PTR. 
+    query_len += name_len;
+
+    // now the query type: A or PTR.
     uint16_t *type = (uint16_t*)(query+query_len);
     if(rev_addr!=INADDR_NONE)
 	*type = htons(12);
@@ -61,97 +62,62 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
     uint16_t *class = (uint16_t*)(query+query_len);
     *class = htons(1);
     query_len += 2;
- 
-    return query_len;	
+
+    return query_len;
 }
 
-int main(int argc, char** argv)
-{
-    if(argc<2) usage();
-	
-    char *hostname=0;
-    char *nameserver=0;
-	
-    char *optString = "-d-n:-i:";
-    int opt = getopt( argc, argv, optString );
-	
-    while( opt != -1 ) {
-	switch( opt ) {      
-	case 'd':
-	    debug = 1; 
-	    break;
-	case 'n':
-	    nameserver = optarg;
-	    break;	 		
-	case 'i':
-	    hostname = optarg;
-	    break;	
-	case '?':
-	    usage();
-	    exit(1);
-	default:
-	    usage();
-	    exit(1);
-	}
-	opt = getopt( argc, argv, optString );
-    }
-
-    linkedlist *ns = (linkedlist *)malloc(sizeof(linkedlist));
-    if (!nameserver) {
-    	// Use root-servers.txt
-    	FILE *servers_in = fopen("root-servers.txt","r");
-    	if (!servers_in) {
-    	    perror("fopen");
-    	    exit(1);
-    	}
-
-    	char root_addr[256];
-    	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
-    	    ns->server = strdup(&root_addr[0]);
-    	    puts(ns->server);
-    	}
-
-    	fclose(servers_in);
-    } else {
-    	ns->server = strdup(nameserver);
-    }
-
-    if (!hostname) {
-	usage();
-	exit(1);
-    }
-
-    // using a constant name server address for now.
-    in_addr_t nameserver_addr=inet_addr(ns->server);
-	
+char *resolve_address(char *hostname, linkedlist *nameservers) {
+    // Could we get ahold of the nameserver?
+    int could_contact_ns = 0;
+    // Stuff we'll use after getting ahold of a nameserver
+    uint8_t answerbuf[1500];
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
 	perror("Creating socket failed: ");
 	exit(1);
     }
-	
-    // construct the query message
-    uint8_t query[1500];
-    int query_len=construct_query(query,1500,hostname);
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    // Loop to contact a nameserver
+    while (!could_contact_ns) {
+	// Try a nameserver
+	in_addr_t nameserver_addr=inet_addr(nameservers->server);
 
-    struct sockaddr_in addr; 	// internet socket address data structure
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(53); // port 53 for DNS
-    addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
-	
-    int send_count = sendto(sock, query, query_len, 0,
-			    (struct sockaddr*)&addr,sizeof(addr));
-    if(send_count<0) { perror("Send failed");	exit(1); }	
+	// construct the query message
+	uint8_t query[1500];
+	int query_len=construct_query(query,1500,hostname);
 
-    // await the response 
-    uint8_t answerbuf[1500];
-    int rec_count = recv(sock,answerbuf,1500,0);
-	
+	struct sockaddr_in addr; 	// internet socket address data structure
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(53); // port 53 for DNS
+	addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
+
+	int send_count = sendto(sock, query, query_len, 0,
+				(struct sockaddr*)&addr,sizeof(addr));
+	if(send_count<0) { perror("Send failed");	exit(1); }
+
+	// Await the response
+	int rec_count = recv(sock,answerbuf,1500,0);
+
+	// Check for errors while receiving
+	if ((rec_count < 1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
+	    printf("Timed out while waiting for nameserver %s.\n", nameservers->server);
+	    linkedlist *head = nameservers;
+	    nameservers = nameservers->next;
+	    free(head->server);
+	    free(head);
+	} else {
+	    could_contact_ns = 1;
+	}
+    }
+
     // parse the response to get our answer
     struct dns_hdr *ans_hdr=(struct dns_hdr*)answerbuf;
     uint8_t *answer_ptr = answerbuf + sizeof(struct dns_hdr);
-	
-    // now answer_ptr points at the first question. 
+
+    // now answer_ptr points at the first question.
     int question_count = ntohs(ans_hdr->q_count);
     int answer_count = ntohs(ans_hdr->a_count);
     int auth_count = ntohs(ans_hdr->auth_count);
@@ -173,7 +139,7 @@ int main(int argc, char** argv)
     // now answer_ptr points at the first answer. loop through
     // all answers in all sections
     for(a=0;a<answer_count+auth_count+other_count;a++) {
-	// first the name this answer is referring to 
+	// first the name this answer is referring to
 	char string_name[255];
 	int dnsnamelen=from_dns_style(answerbuf,answer_ptr,string_name);
 	answer_ptr += dnsnamelen;
@@ -201,7 +167,7 @@ int main(int argc, char** argv)
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
 	    if(debug)
 		printf("The name %s can be resolved by NS: %s\n",
-		       string_name, ns_string);					
+		       string_name, ns_string);
 	    got_answer=1;
 	}
 	// CNAME record
@@ -210,7 +176,7 @@ int main(int argc, char** argv)
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
 	    if(debug)
 		printf("The name %s is also known as %s.\n",
-		       string_name, ns_string);								
+		       string_name, ns_string);
 	    got_answer=1;
 	}
 	// PTR record
@@ -218,7 +184,7 @@ int main(int argc, char** argv)
 	    char ns_string[255];
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
 	    printf("The host at %s is also known as %s.\n",
-		   string_name, ns_string);								
+		   string_name, ns_string);
 	    got_answer=1;
 	}
 	// SOA record
@@ -234,13 +200,78 @@ int main(int argc, char** argv)
 	else {
 	    if(debug)
 		printf("got unknown record type %hu\n",htons(rr->type));
-	} 
+	}
 
 	answer_ptr+=htons(rr->datalen);
     }
-	
-    if(!got_answer) printf("Host %s not found.\n",argv[2]);
-	
+
+    return NULL;
+
     shutdown(sock,SHUT_RDWR);
     close(sock);
+
+}
+
+int main(int argc, char** argv)
+{
+    if(argc<2) usage();
+
+    char *hostname=0;
+    char *nameserver=0;
+
+    char *optString = "-d-n:-i:";
+    int opt = getopt( argc, argv, optString );
+
+    while( opt != -1 ) {
+	switch( opt ) {
+	case 'd':
+	    debug = 1;
+	    break;
+	case 'n':
+	    nameserver = optarg;
+	    break;
+	case 'i':
+	    hostname = optarg;
+	    break;
+	case '?':
+	    usage();
+	    exit(1);
+	default:
+	    usage();
+	    exit(1);
+	}
+	opt = getopt( argc, argv, optString );
+    }
+
+    linkedlist *ns = (linkedlist *)malloc(sizeof(linkedlist));
+    if (!nameserver) {
+    	// Use root-servers.txt
+    	FILE *servers_in = fopen("root-servers.txt","r");
+    	if (!servers_in) {
+    	    perror("fopen");
+    	    exit(1);
+    	}
+
+    	char root_addr[256];
+    	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
+    	    ns->server = strdup(&root_addr[0]);
+    	}
+
+    	fclose(servers_in);
+    } else {
+    	ns->server = strdup(nameserver);
+    }
+
+    if (!hostname) {
+	usage();
+	exit(1);
+    }
+
+    // Try to resolve the given servername or ip address
+    char *result = resolve_address(hostname, ns);
+    if ( result ) {
+	printf("%s resolves to %s.\n", hostname, result);
+    } else {
+	printf("Could not resolve the name %s.\n", hostname);
+    }
 }
