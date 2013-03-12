@@ -41,7 +41,7 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
     uint16_t query_id = (uint16_t) (random() & 0xffff);
     hdr->id = htons(query_id);
     // set header flags to request recursive query
-    hdr->flags = htons(0x0000);
+    hdr->flags = htons(0x0100);
     // 1 question, no answers or other records
     hdr->q_count=htons(1);
 
@@ -67,10 +67,16 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
 }
 
 char *resolve_address(char *hostname, linkedlist *nameservers) {
+    // The hostname we'll be looking up in any recursive call
+    char *newhostname = hostname;
+
     // Could we get ahold of the nameserver?
     int could_contact_ns = 0;
+
     // Stuff we'll use after getting ahold of a nameserver
     uint8_t answerbuf[1500];
+
+    // Build a socket with a timeout
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
 	perror("Creating socket failed: ");
@@ -80,6 +86,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
     // Loop to contact a nameserver
     while (!could_contact_ns) {
 	// Try a nameserver
@@ -207,6 +214,8 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 		printf("The name %s is also known as %s.\n",
 		       string_name, ns_string);
 	    got_answer=1;
+
+	    newhostname = ns_string;
 	}
 	// PTR record
 	else if(htons(rr->type)==RECTYPE_PTR) {
@@ -245,7 +254,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    node = node->next;
 	}
 
-	return resolve_address(hostname, new_nameservers);
+	return resolve_address(newhostname, new_nameservers);
     }
     // TODO:Free the nameservers linkedlist
 
