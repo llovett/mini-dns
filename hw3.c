@@ -9,11 +9,12 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "dns.h"
+#include "linkedlist.h"
 
-static int debug=0, nameserver_flag=0;
+static int debug=0;
 
 void usage() {
-    printf("Usage: hw2 [-d] -n nameserver -i domain/ip_address\n\t-d: debug\n");
+    printf("Usage: hw2 [-d] [-n nameserver] -i domain/ip_address\n\t-d: debug\n");
     exit(1);
 }
 
@@ -80,7 +81,6 @@ int main(int argc, char** argv)
 	    debug = 1; 
 	    break;
 	case 'n':
-	    nameserver_flag = 1; 
 	    nameserver = optarg;
 	    break;	 		
 	case 'i':
@@ -88,20 +88,41 @@ int main(int argc, char** argv)
 	    break;	
 	case '?':
 	    usage();
-	    exit(1);               
+	    exit(1);
 	default:
 	    usage();
 	    exit(1);
 	}
 	opt = getopt( argc, argv, optString );
     }
-		
-    if(!nameserver || !hostname) {
+
+    linkedlist *ns = (linkedlist *)malloc(sizeof(linkedlist));
+    if (!nameserver) {
+    	// Use root-servers.txt
+    	FILE *servers_in = fopen("root-servers.txt","r");
+    	if (!servers_in) {
+    	    perror("fopen");
+    	    exit(1);
+    	}
+
+    	char root_addr[256];
+    	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
+    	    ns->server = strdup(&root_addr[0]);
+    	    puts(ns->server);
+    	}
+
+    	fclose(servers_in);
+    } else {
+    	ns->server = strdup(nameserver);
+    }
+
+    if (!hostname) {
 	usage();
 	exit(1);
     }
+
     // using a constant name server address for now.
-    in_addr_t nameserver_addr=inet_addr(nameserver);
+    in_addr_t nameserver_addr=inet_addr(ns->server);
 	
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if(sock < 0) {
