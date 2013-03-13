@@ -103,6 +103,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	addr.sin_port = htons(53); // port 53 for DNS
 	addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
 
+	printf("Asking %s (%s) if it knows anything about %s.\n", nameservers->server, nameservers->server_addr, hostname);
 	int send_count = sendto(sock, query, query_len, 0,
 				(struct sockaddr*)&addr,sizeof(addr));
 	if(send_count<0) {
@@ -118,9 +119,6 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    printf("Timed out while waiting for nameserver %s.\n", nameservers->server);
 	    linkedlist *head = nameservers;
 	    nameservers = nameservers->next;
-	    /* TODO: cleanup */
-	    /* free(head->server); */
-	    /* free(head); */
 	} else {
 	    could_contact_ns = 1;
 	}
@@ -219,7 +217,10 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 		       string_name, ns_string);
 	    got_answer=1;
 
-	    newhostname = ns_string;
+	    if ( !strcasecmp(string_name,hostname) ) {
+		printf("AHA!!! Found an alias: %s\n", ns_string);
+		newhostname = strdup(ns_string);
+	    }
 	}
 	// PTR record
 	else if(htons(rr->type)==RECTYPE_PTR) {
@@ -260,8 +261,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    // Make sure we have the IP address of this nameserver
 	    if ( !node->server_addr ) {
 		printf("Need to resolve IP address of nameserver %s\n", node->server);
-		node->server_addr = resolve_address(node->server,
-						    root_servers);
+		node->server_addr = resolve_address(node->server, root_servers);
 
 		if ( !node->server_addr ) {
 		    printf("Failed to retrieve IP address for %s.\n", node->server);
@@ -270,6 +270,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    node = node->next;
 	}
 
+	printf("now resolving the hostname %s...\n", newhostname);
 	return resolve_address(newhostname, new_nameservers);
     }
     // TODO:Free the nameservers linkedlist
@@ -336,8 +337,8 @@ int main(int argc, char** argv)
     // Try to resolve the given servername or ip address
     char *result = resolve_address(hostname, root_servers);
     if ( result ) {
-	printf("%s resolves to %s.\n", hostname, result);
+	printf("%s resolves to %s\n", hostname, result);
     } else {
-	printf("Could not resolve the name %s.\n", hostname);
+	printf("Could not resolve the name %s\n", hostname);
     }
 }
