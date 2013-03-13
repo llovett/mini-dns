@@ -227,7 +227,9 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
 	    printf("The host at %s is also known as %s.\n",
 		   string_name, ns_string);
+
 	    got_answer=1;
+	    return strdup(ns_string);
 	}
 	// SOA record
 	else if(htons(rr->type)==RECTYPE_SOA) {
@@ -323,7 +325,7 @@ int main(int argc, char** argv)
 
     	fclose(servers_in);
     } else {
-    	root_servers->server = strdup(nameserver);
+    	root_servers->server_addr = strdup(nameserver);
     }
 
     if (!hostname) {
