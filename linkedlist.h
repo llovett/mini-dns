@@ -15,5 +15,12 @@ linkedlist *list_new(char *servername) {
     return node;
 }
 
-#endif
+void print_list(linkedlist *list) {
+    while ( list ) {
+	printf("node(%x): server=%s, ip=%s\n",
+	       list, list->server, list->server_addr);
+	list = list->next;
+    }
+}
 
+#endif

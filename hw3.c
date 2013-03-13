@@ -13,6 +13,7 @@
 #include "linkedlist.h"
 
 static int debug=0;
+static linkedlist *root_servers;
 
 void usage() {
     printf("Usage: hw2 [-d] [-n nameserver] -i domain/ip_address\n\t-d: debug\n");
@@ -88,6 +89,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     // Loop to contact a nameserver
+    linkedlist *ns_head = nameservers;
     while (!could_contact_ns) {
 	// Try a nameserver
 	in_addr_t nameserver_addr=inet_addr(nameservers->server_addr);
@@ -116,12 +118,14 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    printf("Timed out while waiting for nameserver %s.\n", nameservers->server);
 	    linkedlist *head = nameservers;
 	    nameservers = nameservers->next;
-	    free(head->server);
-	    free(head);
+	    /* TODO: cleanup */
+	    /* free(head->server); */
+	    /* free(head); */
 	} else {
 	    could_contact_ns = 1;
 	}
     }
+    nameservers = ns_head;
 
     // parse the response to get our answer
     struct dns_hdr *ans_hdr=(struct dns_hdr*)answerbuf;
@@ -251,6 +255,16 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	linkedlist *node = nn_head;
 	while ( node ) {
 	    printf("nameserver: %s (ip: %s)\n", node->server, node->server_addr);
+	    // Make sure we have the IP address of this nameserver
+	    if ( !node->server_addr ) {
+		printf("Need to resolve IP address of nameserver %s\n", node->server);
+		node->server_addr = resolve_address(node->server,
+						    root_servers);
+
+		if ( !node->server_addr ) {
+		    printf("Failed to retrieve IP address for %s.\n", node->server);
+		}
+	    }
 	    node = node->next;
 	}
 
@@ -292,7 +306,8 @@ int main(int argc, char** argv)
 	opt = getopt( argc, argv, optString );
     }
 
-    linkedlist *ns = (linkedlist *)malloc(sizeof(linkedlist));
+    /* initialize root servers list */
+    root_servers = (linkedlist *)malloc(sizeof(linkedlist));
     if (!nameserver) {
     	// Use root-servers.txt
     	FILE *servers_in = fopen("root-servers.txt","r");
@@ -303,12 +318,12 @@ int main(int argc, char** argv)
 
     	char root_addr[256];
     	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
-    	    ns->server_addr = strdup(&root_addr[0]);
+    	    root_servers->server_addr = strdup(&root_addr[0]);
     	}
 
     	fclose(servers_in);
     } else {
-    	ns->server = strdup(nameserver);
+    	root_servers->server = strdup(nameserver);
     }
 
     if (!hostname) {
@@ -317,7 +332,7 @@ int main(int argc, char** argv)
     }
 
     // Try to resolve the given servername or ip address
-    char *result = resolve_address(hostname, ns);
+    char *result = resolve_address(hostname, root_servers);
     if ( result ) {
 	printf("%s resolves to %s.\n", hostname, result);
     } else {
