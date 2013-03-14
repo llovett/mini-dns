@@ -23,4 +23,13 @@ void print_list(linkedlist *list) {
     }
 }
 
+int list_size(linkedlist *list) {
+    int count = 0;
+    while (list) {
+	count++;
+	list = list->next;
+    }
+    return count;
+}
+
 #endif

@@ -103,6 +103,9 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	addr.sin_port = htons(53); // port 53 for DNS
 	addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
 
+	if (debug)
+	    printf("How about nameserver %s?\n", nameservers->server_addr);
+
 	int send_count = sendto(sock, query, query_len, 0,
 				(struct sockaddr*)&addr,sizeof(addr));
 	if(send_count<0) {
@@ -123,6 +126,11 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    could_contact_ns = 1;
 	}
     }
+
+    if (debug)
+	printf("Resolving %s using server %s out of %d\n",
+	       hostname, nameservers->server_addr, list_size(nameservers));
+    
     nameservers = ns_head;
 
     // parse the response to get our answer
@@ -172,9 +180,11 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	if(htons(rr->type)==RECTYPE_A) {
 	    char *ip_addr = inet_ntoa(*((struct in_addr *)answer_ptr));
 
-	    printf("The name %s resolves to IP addr: %s\n",
-		   string_name,
-		   ip_addr);
+	    if (debug)
+		printf("The name %s resolves to IP addr: %s\n",
+		       string_name,
+		       ip_addr);
+
 	    got_answer=1;
 
 	    // Are we done?
@@ -216,9 +226,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 		printf("The name %s is also known as %s.\n",
 		       string_name, ns_string);
 	    got_answer=1;
-
 	    if ( !strcasecmp(string_name,hostname) ) {
-		printf("AHA!!! Found an alias: %s\n", ns_string);
 		newhostname = strdup(ns_string);
 	    }
 	}
@@ -226,9 +234,9 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	else if(htons(rr->type)==RECTYPE_PTR) {
 	    char ns_string[255];
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
-	    printf("The host at %s is also known as %s.\n",
-		   string_name, ns_string);
-
+	    if (debug)
+		printf("The host at %s is also known as %s.\n",
+		       string_name, ns_string);
 	    got_answer=1;
 	    return strdup(ns_string);
 	}
