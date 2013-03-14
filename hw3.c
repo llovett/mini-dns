@@ -103,7 +103,6 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	addr.sin_port = htons(53); // port 53 for DNS
 	addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
 
-	printf("Asking %s (%s) if it knows anything about %s.\n", nameservers->server, nameservers->server_addr, hostname);
 	int send_count = sendto(sock, query, query_len, 0,
 				(struct sockaddr*)&addr,sizeof(addr));
 	if(send_count<0) {
@@ -116,7 +115,8 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 
 	// Check for errors while receiving
 	if ((rec_count < 1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
-	    printf("Timed out while waiting for nameserver %s.\n", nameservers->server);
+	    if (debug)
+		printf("Timed out while waiting for nameserver %s.\n", nameservers->server);
 	    linkedlist *head = nameservers;
 	    nameservers = nameservers->next;
 	} else {
@@ -178,7 +178,7 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	    got_answer=1;
 
 	    // Are we done?
-	    if ( !strcasecmp(string_name, hostname) ) {
+	    if ( !strcasecmp(string_name, newhostname) ) {
 		return ip_addr;
 	    }
 
@@ -257,20 +257,21 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
     if ( NULL != new_nameservers ) {
 	linkedlist *node = nn_head;
 	while ( node ) {
-	    printf("nameserver: %s (ip: %s)\n", node->server, node->server_addr);
 	    // Make sure we have the IP address of this nameserver
 	    if ( !node->server_addr ) {
-		printf("Need to resolve IP address of nameserver %s\n", node->server);
+		if (debug)
+		    printf("Need to resolve IP address of nameserver %s\n", node->server);
 		node->server_addr = resolve_address(node->server, root_servers);
 
-		if ( !node->server_addr ) {
+		if ( !node->server_addr && debug ) {
 		    printf("Failed to retrieve IP address for %s.\n", node->server);
 		}
 	    }
 	    node = node->next;
 	}
 
-	printf("now resolving the hostname %s...\n", newhostname);
+	if (debug)
+	    printf("now resolving the hostname %s...\n", newhostname);
 	return resolve_address(newhostname, new_nameservers);
     }
     // TODO:Free the nameservers linkedlist
