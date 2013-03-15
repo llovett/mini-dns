@@ -127,10 +127,11 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
 	}
     }
 
-    if (debug)
+    if (debug) {
 	printf("Resolving %s using server %s out of %d\n",
 	       hostname, nameservers->server_addr, list_size(nameservers));
-    
+    }
+
     nameservers = ns_head;
 
     // parse the response to get our answer
@@ -142,6 +143,12 @@ char *resolve_address(char *hostname, linkedlist *nameservers) {
     int answer_count = ntohs(ans_hdr->a_count);
     int auth_count = ntohs(ans_hdr->auth_count);
     int other_count = ntohs(ans_hdr->other_count);
+
+    if (debug) {
+	int resource_count = question_count + answer_count + auth_count + other_count;
+	printf("%d questions, %d answers, %d authoritative records, and %d others = %d resource records total\n",
+	       question_count, answer_count, auth_count, other_count, resource_count);
+    }
 
     // skip past all questions
     int q;
