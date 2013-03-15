@@ -9,6 +9,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 #include "dns.h"
 
 #define MAX_NAMESERVERS 100
@@ -74,6 +75,33 @@ int construct_query(uint8_t* query, int max_query, char* hostname) {
     return query_len;
 }
 
+void delete_nameservers(nameserver **serverlist, int cap) {
+    int i;
+    for ( i=0; i<cap; i++ ) {
+	nameserver *ns = serverlist[i];
+	if ( ns->server )
+	    free(ns->server);
+	if ( ns->server_addr )
+	    free(ns->server_addr);
+	free(ns);
+    }
+}
+
+nameserver *nameserver_create(char *hostname, char *ip) {
+    nameserver *server = (nameserver*)malloc(sizeof(nameserver));
+    if (hostname) {
+	server->server = strdup(hostname);
+    } else {
+	server->server = NULL;
+    }
+    if (ip) {
+	server->server_addr = strdup(ip);
+    } else {
+	server->server_addr = NULL;
+    }
+    return server;
+}
+
 char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     // The hostname we'll be looking up in any recursive call
     char *newhostname = hostname;
@@ -96,8 +124,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     // Loop to contact a nameserver
-    // TODO: change this to random index
-    int chosen_server = 0;
+    int chosen_server = rand()%ns_count;
     // The nameserver we'll be using to do the query
     nameserver *active_ns;
     while (!could_contact_ns) {
@@ -109,13 +136,14 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	uint8_t query[1500];
 	int query_len=construct_query(query,1500,hostname);
 
-	struct sockaddr_in addr; 	// internet socket address data structure
+	struct sockaddr_in addr;	// internet socket address data structure
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(53); // port 53 for DNS
+	addr.sin_port = htons(53);	// port 53 for DNS
 	addr.sin_addr.s_addr = nameserver_addr; // destination address (any local for now)
 
-	if (debug)
+	if (debug) {
 	    printf("How about nameserver %s?\n", active_ns->server_addr);
+	}
 
 	int send_count = sendto(sock, query, query_len, 0,
 				(struct sockaddr*)&addr,sizeof(addr));
@@ -129,10 +157,11 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 
 	// Check for errors while receiving
 	if ((rec_count < 1) && ((errno == EAGAIN) || (errno == EWOULDBLOCK))) {
-	    if (debug)
+	    if (debug) {
 		printf("Timed out while waiting for nameserver %s.\n", active_ns->server_addr);
-
-	    // TODO: try another random nameserver
+	    }
+	    // Try choosing another nameserver randomly
+	    chosen_server = rand()%ns_count;
 	} else {
 	    could_contact_ns = 1;
 	}
@@ -194,7 +223,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	const uint8_t RECTYPE_AAAA=28;
 
 	if(htons(rr->type)==RECTYPE_A) {
-	    char *ip_addr = inet_ntoa(*((struct in_addr *)answer_ptr));
+	    char *ip_addr = strdup(inet_ntoa(*((struct in_addr *)answer_ptr)));
 
 	    if (debug)
 		printf("The name %s resolves to IP addr: %s\n",
@@ -205,12 +234,13 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 
 	    // Are we done?
 	    if ( !strcasecmp(string_name, newhostname) ) {
+		delete_nameservers(new_nameservers, ns_index);
 		return ip_addr;
 	    }
 
 	    // Try to match some IPs up with symbolic hostnames for nameservers
 	    int i;
-	    for ( i=0; i<ns_count; i++ ) {
+	    for ( i=0; i<ns_index; i++ ) {
 		nameserver *new_ns = new_nameservers[i];
 		if ( !strcasecmp(string_name,new_ns->server) ) {
 		    new_ns->server_addr = strdup(ip_addr);
@@ -228,8 +258,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 
 	    // Keep maximum number of nameservers
 	    if ( ns_index < MAX_NAMESERVERS ) {
-		nameserver *new_ns = (nameserver*)malloc(sizeof(nameserver));
-		new_ns->server = strdup(ns_string);
+		nameserver *new_ns = nameserver_create(ns_string, NULL);
 		new_nameservers[ns_index++] = new_ns;
 	    }
 
@@ -305,8 +334,9 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	    }
 	}
 
-	if (debug)
+	if (debug) {
 	    printf("now resolving the hostname %s...\n", newhostname);
+	}
 	return resolve_address(newhostname, new_nameservers, ns_index);
     }
     // TODO:Free the nameservers array
@@ -358,8 +388,7 @@ int main(int argc, char** argv)
     	char root_addr[256];
 	for ( num_root_servers=0; num_root_servers<MAX_NAMESERVERS; num_root_servers++ ) {
 	    if (EOF != fscanf(servers_in, "%s\n", &root_addr[0])) {
-		nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
-		ns->server_addr = strdup(&root_addr[0]);
+		nameserver *ns = nameserver_create(NULL, root_addr);
 		root_servers[num_root_servers] = ns;
 	    } else {
 		fclose(servers_in);
@@ -368,8 +397,7 @@ int main(int argc, char** argv)
 	}
 
     } else {
-	nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
-	ns->server_addr = strdup(given_ns);
+	nameserver *ns = nameserver_create(NULL, given_ns);
 	root_servers[0] = ns;
 	num_root_servers = 1;
     }
@@ -378,6 +406,9 @@ int main(int argc, char** argv)
 	usage();
 	exit(1);
     }
+
+    // Setup random number generation
+    srand(time(NULL));
 
     // Try to resolve the given servername or ip address
     char *result = resolve_address(hostname, root_servers, num_root_servers);
