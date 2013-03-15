@@ -370,6 +370,7 @@ int main(int argc, char** argv)
     } else {
 	nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
 	ns->server_addr = strdup(given_ns);
+	root_servers[0] = ns;
 	num_root_servers = 1;
     }
 
