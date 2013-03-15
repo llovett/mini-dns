@@ -11,13 +11,15 @@
 #include <errno.h>
 #include "dns.h"
 
+#define MAX_NAMESERVERS 100
+
 typedef struct {
     char *server;
     char *server_addr;
 } nameserver;
 
 static int debug=0;
-static nameserver *root_servers[100];
+static nameserver *root_servers[MAX_NAMESERVERS];
 static int num_root_servers;
 
 void usage() {
@@ -224,9 +226,12 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 		printf("The name %s can be resolved by NS: %s\n",
 		       string_name, ns_string);
 
-	    nameserver *new_ns = (nameserver*)malloc(sizeof(nameserver));
-	    new_ns->server = strdup(ns_string);
-	    new_nameservers[ns_index++] = new_ns;
+	    // Keep maximum number of nameservers
+	    if ( ns_index < MAX_NAMESERVERS ) {
+		nameserver *new_ns = (nameserver*)malloc(sizeof(nameserver));
+		new_ns->server = strdup(ns_string);
+		new_nameservers[ns_index++] = new_ns;
+	    }
 
 	    got_answer=1;
 	}
@@ -234,37 +239,48 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	else if(htons(rr->type)==RECTYPE_CNAME) {
 	    char ns_string[255];
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
-	    if(debug)
+
+	    if(debug) {
 		printf("The name %s is also known as %s.\n",
 		       string_name, ns_string);
-	    got_answer=1;
+	    }
+
 	    if ( !strcasecmp(string_name,hostname) ) {
 		newhostname = strdup(ns_string);
 	    }
+
+	    got_answer=1;
 	}
 	// PTR record
 	else if(htons(rr->type)==RECTYPE_PTR) {
 	    char ns_string[255];
 	    int ns_len=from_dns_style(answerbuf,answer_ptr,ns_string);
-	    if (debug)
+
+	    if (debug) {
 		printf("The host at %s is also known as %s.\n",
 		       string_name, ns_string);
+	    }
+
 	    got_answer=1;
+
 	    return strdup(ns_string);
 	}
 	// SOA record
 	else if(htons(rr->type)==RECTYPE_SOA) {
-	    if(debug)
+	    if(debug) {
 		printf("Ignoring SOA record\n");
+	    }
 	}
 	// AAAA record
 	else if(htons(rr->type)==RECTYPE_AAAA)  {
-	    if(debug)
+	    if(debug) {
 		printf("Ignoring IPv6 record\n");
+	    }
 	}
 	else {
-	    if(debug)
+	    if(debug) {
 		printf("got unknown record type %hu\n",htons(rr->type));
+	    }
 	}
 
 	answer_ptr+=htons(rr->datalen);
@@ -340,13 +356,17 @@ int main(int argc, char** argv)
     	}
 
     	char root_addr[256];
-    	while ( EOF != fscanf(servers_in, "%s\n", &root_addr[0]) ) {
-	    nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
-	    ns->server_addr = strdup(&root_addr[0]);
-	    root_servers[num_root_servers++] = ns;
-    	}
+	for ( num_root_servers=0; num_root_servers<MAX_NAMESERVERS; num_root_servers++ ) {
+	    if (EOF != fscanf(servers_in, "%s\n", &root_addr[0])) {
+		nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
+		ns->server_addr = strdup(&root_addr[0]);
+		root_servers[num_root_servers] = ns;
+	    } else {
+		fclose(servers_in);
+		break;
+	    }
+	}
 
-    	fclose(servers_in);
     } else {
 	nameserver *ns = (nameserver*)malloc(sizeof(nameserver));
 	ns->server_addr = strdup(given_ns);
