@@ -12,7 +12,10 @@
 #include <time.h>
 #include "dns.h"
 
+// Maximum number of nameservers we'll pay attention to/try to use at once
 #define MAX_NAMESERVERS 100
+// Maximum number of times to try to contact any one nameserver
+#define MAX_ATTEMPTS 5
 
 typedef struct {
     char *server;
@@ -115,9 +118,6 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     // The hostname we'll be looking up in any recursive call
     char *newhostname = hostname;
 
-    // Could we get ahold of the nameserver?
-    int could_contact_ns = 0;
-
     // Stuff we'll use after getting ahold of a nameserver
     uint8_t answerbuf[1500];
 
@@ -136,7 +136,9 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     int chosen_server = rand()%ns_count;
     // The nameserver we'll be using to do the query
     nameserver *active_ns;
-    while (!could_contact_ns) {
+    // Number of times left to try contacting a nameserver
+    int attempts_left = MAX_ATTEMPTS * ns_count;
+    while ( attempts_left-- > 0 ) {
 	// Try a nameserver
 	active_ns = nameservers[chosen_server];
 	in_addr_t nameserver_addr=inet_addr(active_ns->server_addr);
@@ -172,7 +174,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	    // Try choosing another nameserver randomly
 	    chosen_server = rand()%ns_count;
 	} else {
-	    could_contact_ns = 1;
+	    break;
 	}
     }
 
@@ -285,7 +287,9 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 		       string_name, ns_string);
 	    }
 
-	    if ( !strcasecmp(string_name,hostname) ) {
+	    if ( !strcasecmp(string_name,newhostname) ) {
+		if ( newhostname != hostname )
+		    free(newhostname);
 		newhostname = strdup(ns_string);
 	    }
 
@@ -356,12 +360,13 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 
 	// Free old nameservers array
 	char *result = resolve_address(newhostname, new_nameservers, ns_index);
-
 	if (newhostname != hostname)
 	    free(newhostname);
 	delete_nameservers(new_nameservers, ns_index);
 	return result;
     }
+    printf("CANNOT RESOLVE ------------- %s\n", newhostname);
+
     if (newhostname != hostname)
 	free(newhostname);
     delete_nameservers(new_nameservers, ns_index);
