@@ -104,15 +104,6 @@ nameserver *nameserver_create(char *hostname, char *ip) {
     }
     return server;
 }
-
-void print_nameservers(nameserver **serverlist, int cap) {
-    int i;
-    for ( i=0; i<cap; i++ ) {
-	nameserver *ns = serverlist[i];
-	printf("nameserver(%x): %s(%x) %s(%x)\n",
-	       ns, ns->server, &(ns->server), ns->server_addr, &(ns->server_addr));
-    }
-}
     
 char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     // The hostname we'll be looking up in any recursive call
@@ -365,7 +356,6 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	delete_nameservers(new_nameservers, ns_index);
 	return result;
     }
-    printf("CANNOT RESOLVE ------------- %s\n", newhostname);
 
     if (newhostname != hostname)
 	free(newhostname);
