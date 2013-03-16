@@ -168,6 +168,10 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	    break;
 	}
     }
+    if ( attempts_left <= 0 ) {
+	fprintf(stderr, "Could not contact any nameservers.");
+	exit(1);
+    }
 
     if (debug) {
 	printf("Resolving %s using server %s out of %d\n",
