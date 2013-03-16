@@ -102,6 +102,15 @@ nameserver *nameserver_create(char *hostname, char *ip) {
     return server;
 }
 
+void print_nameservers(nameserver **serverlist, int cap) {
+    int i;
+    for ( i=0; i<cap; i++ ) {
+	nameserver *ns = serverlist[i];
+	printf("nameserver(%x): %s(%x) %s(%x)\n",
+	       ns, ns->server, &(ns->server), ns->server_addr, &(ns->server_addr));
+    }
+}
+    
 char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
     // The hostname we'll be looking up in any recursive call
     char *newhostname = hostname;
@@ -223,7 +232,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	const uint8_t RECTYPE_AAAA=28;
 
 	if(htons(rr->type)==RECTYPE_A) {
-	    char *ip_addr = strdup(inet_ntoa(*((struct in_addr *)answer_ptr)));
+	    char *ip_addr = inet_ntoa(*((struct in_addr *)answer_ptr));
 
 	    if (debug)
 		printf("The name %s resolves to IP addr: %s\n",
@@ -235,7 +244,9 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	    // Are we done?
 	    if ( !strcasecmp(string_name, newhostname) ) {
 		delete_nameservers(new_nameservers, ns_index);
-		return ip_addr;
+		if (newhostname != hostname)
+		    free(newhostname);
+		return strdup(ip_addr);
 	    }
 
 	    // Try to match some IPs up with symbolic hostnames for nameservers
@@ -292,6 +303,9 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 
 	    got_answer=1;
 
+	    delete_nameservers(new_nameservers, ns_index);
+	    if (newhostname != hostname)
+		free(newhostname);
 	    return strdup(ns_string);
 	}
 	// SOA record
@@ -324,8 +338,10 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	    nameserver *ns = new_nameservers[i];
 	    // Make sure we have the IP address of this nameserver
 	    if ( !ns->server_addr ) {
-		if (debug)
+		if (debug) {
 		    printf("Need to resolve IP address of nameserver %s\n", ns->server);
+		}
+
 		ns->server_addr = resolve_address(ns->server, root_servers, num_root_servers);
 
 		if ( !ns->server_addr && debug ) {
@@ -337,9 +353,18 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	if (debug) {
 	    printf("now resolving the hostname %s...\n", newhostname);
 	}
-	return resolve_address(newhostname, new_nameservers, ns_index);
+
+	// Free old nameservers array
+	char *result = resolve_address(newhostname, new_nameservers, ns_index);
+
+	if (newhostname != hostname)
+	    free(newhostname);
+	delete_nameservers(new_nameservers, ns_index);
+	return result;
     }
-    // TODO:Free the nameservers array
+    if (newhostname != hostname)
+	free(newhostname);
+    delete_nameservers(new_nameservers, ns_index);
 
     return NULL;
 }
@@ -417,4 +442,8 @@ int main(int argc, char** argv)
     } else {
 	printf("Could not resolve the name %s\n", hostname);
     }
+
+    // Cleanup
+    free(result);
+    delete_nameservers(root_servers, num_root_servers);
 }
