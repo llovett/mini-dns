@@ -169,7 +169,7 @@ char *resolve_address(char *hostname, nameserver **nameservers, int ns_count) {
 	}
     }
     if ( attempts_left <= 0 ) {
-	fprintf(stderr, "Could not contact any nameservers.");
+	fprintf(stderr, "Could not contact any nameservers.\n");
 	exit(1);
     }
 
@@ -445,4 +445,6 @@ int main(int argc, char** argv)
     // Cleanup
     free(result);
     delete_nameservers(root_servers, num_root_servers);
+
+    return 0;
 }
